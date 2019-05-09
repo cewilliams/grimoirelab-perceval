@@ -384,6 +384,10 @@ class GitHub(Backend):
         for raw_requested_reviewers in group_requested_reviewers:
             group_requested_reviewers = json.loads(raw_requested_reviewers)
 
+            # GH Enterprise returns list of users instead of dict (issue #523)
+            if isinstance(group_requested_reviewers, list):
+                group_requested_reviewers = {'users': group_requested_reviewers}
+
             for requested_reviewer in group_requested_reviewers['users']:
                 user_data = self.__get_user(requested_reviewer['login'])
                 requested_reviewers.append(user_data)
