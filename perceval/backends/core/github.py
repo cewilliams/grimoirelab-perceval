@@ -278,6 +278,11 @@ class GitHub(Backend):
 
             pull['reviews_data'] = self.__get_pull_reviews(pull['number'])
 
+            # print(" FPR: PR:", pull['number'])
+            pull['comments_data'] = self.__get_pull_comments(pull['number'])
+            # pull['reactions_data'] = self.__get_pull_reactions(pull['number'])
+
+            #print("PR:", pull['number'], ":", ", ".join(pull.keys()))
             for field in TARGET_PULL_FIELDS:
                 if not pull[field]:
                     continue
@@ -287,6 +292,7 @@ class GitHub(Backend):
                 elif field == 'merged_by':
                     pull[field + '_data'] = self.__get_user(pull[field]['login'])
                 elif field == 'review_comments':
+                    # print(" FPr: Getting pr review comments")
                     pull[field + '_data'] = self.__get_pull_review_comments(pull['number'])
                 elif field == 'requested_reviewers':
                     pull[field + '_data'] = self.__get_pull_requested_reviewers(pull['number'])
@@ -408,9 +414,36 @@ class GitHub(Backend):
 
         return hashes
 
+    def __get_pull_comments(self, pr_number):
+        """Get pull request comments"""
+
+        # print("  GPC: PR", pr_number)
+        comments = []
+        group_comments = self.client.pull_comments(pr_number)
+
+        for raw_comments in group_comments:
+
+            for comment in json.loads(raw_comments):
+                comment_id = comment.get('id')
+                # print("  GPC: PR:", pr_number, "comment:", comment_id)
+
+                user = comment.get('user', None)
+                if not user:
+                    logger.warning("Missing user info for %s", comment['url'])
+                    comment['user_data'] = None
+                else:
+                    comment['user_data'] = self.__get_user(user['login'])
+
+                # print("   GPC: comment", comment)
+                comment['reactions_data'] = \
+                    self.__get_pull_comment_reactions(comment_id, comment['reactions']['total_count'])
+                comments.append(comment)
+        return comments
+                
     def __get_pull_review_comments(self, pr_number):
         """Get pull request review comments"""
 
+        # print("  GPRC: PR:", pr_number)
         comments = []
         group_comments = self.client.pull_review_comments(pr_number)
 
@@ -418,6 +451,7 @@ class GitHub(Backend):
 
             for comment in json.loads(raw_comments):
                 comment_id = comment.get('id')
+                # print("  GPRC: PR:", pr_number, "comment:", comment_id)
 
                 user = comment.get('user', None)
                 if not user:
@@ -454,12 +488,32 @@ class GitHub(Backend):
     def __get_pull_review_comment_reactions(self, comment_id, total_count):
         """Get pull review comment reactions"""
 
+        # print("  GPRCR: id:", comment_id, "count:", total_count)
         reactions = []
 
         if total_count == 0:
             return reactions
 
         group_reactions = self.client.pull_review_comment_reactions(comment_id)
+
+        for raw_reactions in group_reactions:
+
+            for reaction in json.loads(raw_reactions):
+                reaction['user_data'] = self.__get_user(reaction['user']['login'])
+                reactions.append(reaction)
+
+        return reactions
+
+    def __get_pull_comment_reactions(self, comment_id, total_count):
+        """Get pull comment reactions"""
+
+        # print("  GPCR: id:", comment_id, "count:", total_count)
+        reactions = []
+
+        if total_count == 0:
+            return reactions
+
+        group_reactions = self.client.pull_review_reactions(comment_id)
 
         for raw_reactions in group_reactions:
 
@@ -503,6 +557,8 @@ class GitHub(Backend):
         pull['requested_reviewers_data'] = []
         pull['merged_by_data'] = []
         pull['commits_data'] = []
+        pull['comments_data'] = []
+        #pull['reactions_data'] = []
 
 
 class GitHubClient(HttpClient, RateLimitHandler):
@@ -686,6 +742,31 @@ class GitHubClient(HttpClient, RateLimitHandler):
         comments_url = urijoin("pulls", str(pr_number), "comments")
         return self.fetch_items(comments_url, payload)
 
+    def pull_comments(self, pr_number): #
+        """Get pull request comments"""
+
+        payload = {
+            'per_page': PER_PAGE,
+            'direction': 'asc',
+            'sort': 'updated'
+        }
+
+        # /issues/ comments on pull request is all comments, /pulls/ comments are just review comments
+        comments_url = urijoin("issues", str(pr_number), "comments")
+        return self.fetch_items(comments_url, payload)
+
+    # def pull_reactions(self, pr_number): ##
+    #     """Get pull request reactions"""
+
+    #     payload = {
+    #         'per_page': PER_PAGE,
+    #         'direction': 'asc',
+    #         'sort': 'updated'
+    #     }
+
+    #     comments_url = urijoin("issues", str(pr_number), "comments")
+    #     return self.fetch_items(comments_url, payload)
+
     def pull_reviews(self, pr_number):
         """Get pull request reviews"""
 
@@ -708,6 +789,18 @@ class GitHubClient(HttpClient, RateLimitHandler):
         }
 
         path = urijoin("pulls", "comments", str(comment_id), "reactions")
+        return self.fetch_items(path, payload)
+
+    def pull_review_reactions(self, comment_id):
+        """Get reactions of a regular comment: use /issues/ instead of /pulls/"""
+
+        payload = {
+            'per_page': PER_PAGE,
+            'direction': 'asc',
+            'sort': 'updated'
+        }
+
+        path = urijoin("issues", "comments", str(comment_id), "reactions")
         return self.fetch_items(path, payload)
 
     def user(self, login):
